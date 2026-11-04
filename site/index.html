@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nave — Dissolving Cathedral</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;1,300&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+  "animejs": "https://cdn.jsdelivr.net/npm/animejs@4.0.2/+esm",
+  "lenis": "https://cdn.jsdelivr.net/npm/lenis@1.1.20/+esm"
+} }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+
+<div id="loader"></div>
+
+<div class="bar"><i id="bar"></i></div>
+
+<div id="hint" aria-hidden="true"><span>Scroll</span><i></i></div>
+
+<main id="scroll-space"></main>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
