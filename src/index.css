@@ -29,7 +29,7 @@ body {
 }
 
 .stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-.scroll-space { height: 1360vh; }
+.scroll-space { height: 4160vh; }
 .vignette {
   position: fixed; inset: 0; pointer-events: none;
   background: radial-gradient(ellipse at 50% 55%, transparent 45%, rgba(0, 0, 0, .65) 100%);
@@ -53,3 +53,10 @@ body {
 @keyframes drip { 0% { transform: scaleY(0); } 60% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) { .loader { transition: none; } }
+
+.words { position: fixed; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.word {
+  position: absolute; width: min(34ch, 80vw); text-align: center; white-space: pre-line; opacity: 0; visibility: hidden;
+  font-size: clamp(1.3rem, 2.8vw, 2.2rem); font-weight: 300; line-height: 1.35; letter-spacing: .04em;
+  color: var(--ink); text-shadow: 0 0 24px rgba(0, 0, 0, .9), 0 0 60px rgba(243, 227, 200, .15);
+}
