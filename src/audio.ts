@@ -3,8 +3,11 @@ import type { Rig } from './scene/timeline'
 // Procedural audio (no assets). Browsers block audio until a gesture, so nothing starts before the first one.
 export function createAudio() {
   let ctx: AudioContext | null = null
-  let warm: GainNode, cool: GainNode, air: GainNode, shimmer: GainNode, rainHiss: GainNode
+  let warm: GainNode, cool: GainNode, air: GainNode, shimmer: GainNode, rainGain: GainNode, wind: GainNode
   let lastTick = 0
+  let muted = false
+  let master: GainNode
+  let suspendTimer = 0
 
   const osc = (f: number, dest: AudioNode, lfoHz: number) => {
     const o = ctx!.createOscillator(), g = ctx!.createGain(), l = ctx!.createOscillator(), lg = ctx!.createGain()
@@ -18,11 +21,12 @@ export function createAudio() {
   }
 
   const start = () => {
-    if (ctx) return void ctx.resume()
+    if (ctx) return void (muted || ctx.resume())
     ctx = new AudioContext()
-    const master = ctx.createGain()
+    if (muted) void ctx.suspend()
+    master = ctx.createGain()
     master.gain.setValueAtTime(0, ctx.currentTime)
-    master.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 4)
+    master.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 4)
     master.connect(ctx.destination)
     const bus = (cut: number) => {
       const g = ctx!.createGain(), f = ctx!.createBiquadFilter()
@@ -44,25 +48,32 @@ export function createAudio() {
     n.connect(nf).connect(air).connect(master)
     n.start()
 
-    // rain: a soft high-passed hiss under sparse droplet ticks (ticks scheduled from update())
-    const rn = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter()
-    rn.buffer = buf; rn.loop = true; rn.playbackRate.value = 1.3
-    hp.type = 'highpass'; hp.frequency.value = 1800
-    lp.type = 'lowpass'; lp.frequency.value = 7500
-    rainHiss = ctx.createGain(); rainHiss.gain.value = 0
-    rn.connect(hp).connect(lp).connect(rainHiss).connect(master)
-    rn.start()
-  }
+    // marsh air: soft wind through the reeds, swelling slowly (replaces the drones once we arrive)
+    const wn = ctx.createBufferSource(), wf = ctx.createBiquadFilter(), wl = ctx.createOscillator(), wlg = ctx.createGain(), gust = ctx.createGain()
+    wn.buffer = buf; wn.loop = true; wn.playbackRate.value = 0.7
+    wf.type = 'bandpass'; wf.frequency.value = 650; wf.Q.value = 0.35
+    wind = ctx.createGain(); wind.gain.value = 0
+    gust.gain.value = 0.65; wl.frequency.value = 0.09; wlg.gain.value = 0.35 // gusts: ~11 s swell between 0.3x and 1x
+    wl.connect(wlg).connect(gust.gain)
+    wn.connect(wf).connect(gust).connect(wind).connect(master)
+    wn.start(); wl.start()
 
-  /** One soft drop: a few ms of band-passed noise, randomly placed in the stereo field. */
-  const drop = (level: number) => {
-    const len = Math.floor(ctx!.sampleRate * 0.012), b = ctx!.createBuffer(1, len, ctx!.sampleRate), d = b.getChannelData(0)
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3
-    const s = ctx!.createBufferSource(), f = ctx!.createBiquadFilter(), g = ctx!.createGain(), p = ctx!.createStereoPanner()
-    s.buffer = b; f.type = 'bandpass'; f.frequency.value = 2500 + Math.random() * 3500; f.Q.value = 1.5
-    g.gain.value = level * (0.4 + Math.random() * 0.6); p.pan.value = Math.random() * 2 - 1
-    s.connect(f).connect(g).connect(p).connect(ctx!.destination)
-    s.start()
+    // rain: the recorded loop, softened to sit inside the mist (no rumble, no harsh top end)
+    const hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter()
+    hp.type = 'highpass'; hp.frequency.value = 140
+    lp.type = 'lowpass'; lp.frequency.value = 9000
+    rainGain = ctx.createGain(); rainGain.gain.value = 0
+    hp.connect(lp).connect(rainGain).connect(master)
+    const c = ctx
+    void fetch(`${import.meta.env.BASE_URL}rain.mp3`)
+      .then((r) => r.arrayBuffer())
+      .then((b) => c.decodeAudioData(b))
+      .then((decoded) => {
+        const src = c.createBufferSource()
+        src.buffer = decoded; src.loop = true
+        src.connect(hp); src.start()
+      })
+      .catch((e) => console.error('rain.mp3 failed to load', e))
   }
 
   const events = ['wheel', 'keydown', 'pointerdown', 'touchstart', 'touchend', 'click'] as const // iOS only unlocks audio on touchend/click
@@ -78,8 +89,23 @@ export function createAudio() {
       cool.gain.setTargetAtTime(0.3 * rig.nav * music, t, 1.2)
       air.gain.setTargetAtTime((0.03 + 0.05 * rig.dust) * music, t, 1.2)
       shimmer.gain.setTargetAtTime(0.18 * rig.glow * music, t, 1.2)
-      rainHiss.gain.setTargetAtTime(0.06 * rig.rain, t, 0.8)
-      if (ctx.state === 'running' && Math.random() < 0.35 * rig.rain) drop(0.07) // ~20 drops/s at 60fps, kept very quiet
+      rainGain.gain.setTargetAtTime(0.5 * rig.rain, t, 1.5) // rain fades in slowly as the white clears
+      wind.gain.setTargetAtTime(0.06 * rig.marsh, t, 2.5)
+    },
+    /** Mute/unmute everything by suspending the context (works before the first gesture too). */
+    setMuted(m: boolean) {
+      muted = m
+      if (!ctx) return
+      const c = ctx
+      window.clearTimeout(suspendTimer)
+      master.gain.cancelScheduledValues(c.currentTime)
+      master.gain.setValueAtTime(master.gain.value, c.currentTime)
+      if (m) { // fade out, then suspend once silent
+        master.gain.setTargetAtTime(0, c.currentTime, 0.18)
+        suspendTimer = window.setTimeout(() => { if (muted) void c.suspend() }, 900)
+      } else {
+        void c.resume().then(() => master.gain.setTargetAtTime(0.35, c.currentTime, 0.3))
+      }
     },
     /** Soft key tick; throttled so fast scrolling doesn't machine-gun. */
     tick() {
@@ -90,12 +116,13 @@ export function createAudio() {
       const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain()
       s.buffer = buf
       f.type = 'bandpass'; f.frequency.value = 1800 + Math.random() * 1400; f.Q.value = 1.2
-      g.gain.value = 0.12
+      g.gain.value = 0.085
       s.connect(f).connect(g).connect(ctx.destination)
       s.start()
     },
     dispose() {
       events.forEach((e) => window.removeEventListener(e, start))
+      window.clearTimeout(suspendTimer)
       void ctx?.close()
     },
   }

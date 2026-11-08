@@ -21,7 +21,11 @@ export const TEXT_END = 45000 // floating-text scene fills the void between cath
 const CROSS = 7000 // final crossing to the portal
 const START = TEXT_END + CROSS
 const ENTER = 20000 // through the portal, then the white slowly clears onto the marsh
-export const TOTAL = START + ENTER // ms of timeline, mapped 0..1 onto scroll progress
+export const NARRATION = START + ENTER // the narrator returns once the white has cleared onto the marsh
+export const ASK_SHOW = NARRATION + 13200 // the yes/no choice appears once the question has typed
+export const ASK_LOCK = NARRATION + 14000 // scroll is held here until the user answers
+export const ANSWERED = NARRATION + 19500 // after answering we glide on to here (response line has typed by then)
+export const TOTAL = NARRATION + 46000 // ms of timeline, mapped 0..1 onto scroll progress
 
 export const createRig = (): Rig => ({ z: 2, y: 1.6, lookY: 3.0, R: 0, dust: 0, exp: 1.0, fog: 0.012, nav: 0, portal: 0, glow: 0, white: 0, marsh: 0, rain: 0 })
 
