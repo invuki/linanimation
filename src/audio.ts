@@ -3,7 +3,7 @@ import type { Rig } from './scene/timeline'
 // Procedural audio (no assets). Browsers block audio until a gesture, so nothing starts before the first one.
 export function createAudio() {
   let ctx: AudioContext | null = null
-  let warm: GainNode, cool: GainNode, air: GainNode, shimmer: GainNode
+  let warm: GainNode, cool: GainNode, air: GainNode, shimmer: GainNode, rainHiss: GainNode
   let lastTick = 0
 
   const osc = (f: number, dest: AudioNode, lfoHz: number) => {
@@ -43,9 +43,29 @@ export function createAudio() {
     air = ctx.createGain(); air.gain.value = 0
     n.connect(nf).connect(air).connect(master)
     n.start()
+
+    // rain: a soft high-passed hiss under sparse droplet ticks (ticks scheduled from update())
+    const rn = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter()
+    rn.buffer = buf; rn.loop = true; rn.playbackRate.value = 1.3
+    hp.type = 'highpass'; hp.frequency.value = 1800
+    lp.type = 'lowpass'; lp.frequency.value = 7500
+    rainHiss = ctx.createGain(); rainHiss.gain.value = 0
+    rn.connect(hp).connect(lp).connect(rainHiss).connect(master)
+    rn.start()
   }
 
-  const events = ['wheel', 'keydown', 'pointerdown', 'touchstart'] as const
+  /** One soft drop: a few ms of band-passed noise, randomly placed in the stereo field. */
+  const drop = (level: number) => {
+    const len = Math.floor(ctx!.sampleRate * 0.012), b = ctx!.createBuffer(1, len, ctx!.sampleRate), d = b.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3
+    const s = ctx!.createBufferSource(), f = ctx!.createBiquadFilter(), g = ctx!.createGain(), p = ctx!.createStereoPanner()
+    s.buffer = b; f.type = 'bandpass'; f.frequency.value = 2500 + Math.random() * 3500; f.Q.value = 1.5
+    g.gain.value = level * (0.4 + Math.random() * 0.6); p.pan.value = Math.random() * 2 - 1
+    s.connect(f).connect(g).connect(p).connect(ctx!.destination)
+    s.start()
+  }
+
+  const events = ['wheel', 'keydown', 'pointerdown', 'touchstart', 'touchend', 'click'] as const // iOS only unlocks audio on touchend/click
   events.forEach((e) => window.addEventListener(e, start, { passive: true }))
 
   return {
@@ -54,9 +74,12 @@ export function createAudio() {
       if (!ctx) return
       const t = ctx.currentTime
       warm.gain.setTargetAtTime(0.35 * (1 - rig.nav), t, 0.5)
-      cool.gain.setTargetAtTime(0.3 * rig.nav, t, 0.5)
-      air.gain.setTargetAtTime(0.03 + 0.05 * rig.dust, t, 0.5)
-      shimmer.gain.setTargetAtTime(0.18 * rig.glow, t, 0.5)
+      const music = 1 - rig.marsh // the drones give way entirely once we're in the marsh; only rain remains
+      cool.gain.setTargetAtTime(0.3 * rig.nav * music, t, 1.2)
+      air.gain.setTargetAtTime((0.03 + 0.05 * rig.dust) * music, t, 1.2)
+      shimmer.gain.setTargetAtTime(0.18 * rig.glow * music, t, 1.2)
+      rainHiss.gain.setTargetAtTime(0.06 * rig.rain, t, 0.8)
+      if (ctx.state === 'running' && Math.random() < 0.35 * rig.rain) drop(0.07) // ~20 drops/s at 60fps, kept very quiet
     },
     /** Soft key tick; throttled so fast scrolling doesn't machine-gun. */
     tick() {

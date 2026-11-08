@@ -12,6 +12,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const wordsRef = useRef<HTMLDivElement>(null)
+  const whiteRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
@@ -63,6 +64,7 @@ function App() {
       lenis.raf(t)
       cathedral.frame(t / 1000, rig)
       audio.update(rig)
+      whiteRef.current!.style.opacity = String(rig.white)
       raf.id = requestAnimationFrame(loop)
     }
     raf.id = requestAnimationFrame(loop)
@@ -82,6 +84,7 @@ function App() {
     <>
       <canvas ref={canvasRef} className="stage" />
       <div className="vignette" />
+      <div ref={whiteRef} className="whiteout" />
       <div ref={wordsRef} className="words" aria-hidden="true" />
       <div className={`loader${ready ? ' done' : ''}`} />
       <div ref={hintRef} className="hint" aria-hidden="true"><span>Scroll</span><i /></div>

@@ -19,7 +19,7 @@ export function createWords(root: HTMLElement, name: string, onType?: () => void
   const rows = LINES.map((l) => {
     const d = document.createElement('div')
     d.className = 'word'
-    d.style.left = `${l.x}%`
+    d.style.setProperty('--x', `${l.x}%`) // centred on narrow screens via CSS
     d.style.top = `${l.y}%`
     const chars: HTMLElement[] = []
     // one span per letter (hidden until typed) so wrapping never shifts while typing; words stay unbroken

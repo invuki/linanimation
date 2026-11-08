@@ -4,7 +4,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { LOW_POWER } from '../quality'
 import { createPortal } from './portal'
+import { createMarsh, MARSH_HAZE, MARSH_FOG, marshFov } from './marsh'
 import { createGlassMaterial, patch, U } from './dissolve'
 import type { Rig } from './timeline'
 
@@ -20,7 +22,7 @@ const ease = (v: number) => Math.sign(v) * Math.abs(v) ** 2.6
 /** Builds the cathedral scene on `canvas`. Call `dispose()` on unmount (StrictMode mounts twice). */
 export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, LOW_POWER ? 1.25 : 1.75))
   renderer.toneMapping = THREE.ACESFilmicToneMapping
 
   const scene = new THREE.Scene()
@@ -31,13 +33,14 @@ export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void)
   const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 400)
 
   // post: bloom only matters once the portal is on screen; tone mapping moves to OutputPass
-  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }))
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: LOW_POWER ? 0 : 4 }))
   composer.addPass(new RenderPass(scene, camera))
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0, 0.7, 0.85)
   composer.addPass(bloom)
   composer.addPass(new OutputPass())
 
   const portal = createPortal(scene)
+  const marsh = createMarsh(scene, renderer, -96)
   const bgWarm = new THREE.Color(VOID), bgCool = new THREE.Color(VOID_COOL)
   const dustWarm = new THREE.Color(DUST_WARM), dustCool = new THREE.Color(DUST_COOL)
   let cathedralRoot: THREE.Object3D | null = null
@@ -70,7 +73,7 @@ export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void)
   scene.add(lamp)
 
   // dust: the void's only inhabitants
-  const DUST = 1800
+  const DUST = LOW_POWER ? 700 : 1800
   const dpos = new Float32Array(DUST * 3)
   for (let i = 0; i < DUST; i++) {
     dpos[i * 3] = (Math.random() - 0.5) * 60
@@ -130,6 +133,12 @@ export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void)
 
   /** Draw one frame. `t` is seconds. */
   function frame(t: number, rig: Rig) {
+    // marsh: same render settings as the Blender scene (AgX view transform, 35mm lens framing, exposure 0)
+    const inMarsh = rig.marsh > 0.5
+    const tm = inMarsh ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping
+    if (renderer.toneMapping !== tm) renderer.toneMapping = tm
+    const fov = inMarsh ? marshFov(camera.aspect) : camera.aspect < 1 ? 72 : 52
+    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix() }
     camera.position.set(Math.sin(t * 0.4) * 0.05, rig.y + Math.sin(t * 0.9) * 0.015, rig.z)
     camera.lookAt(0, rig.lookY, rig.z - 18)
     const dt = Math.min(0.1, Math.max(0, t - lastT)); lastT = t
@@ -142,16 +151,18 @@ export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void)
     U.uCam.value.copy(camera.position)
     U.uR.value = rig.R
     U.uTime.value = t
-    fog.density = rig.fog
+    fog.density = THREE.MathUtils.lerp(rig.fog, MARSH_FOG, rig.marsh)
     renderer.toneMappingExposure = rig.exp
     dust.position.set(0, 0, rig.z)
     dust.rotation.y = t * 0.01
-    dustMat.opacity = rig.dust * 0.85
+    dustMat.opacity = rig.dust * 0.85 * (1 - rig.marsh)
     dustMat.color.copy(dustWarm).lerp(dustCool, rig.nav)
     ;(scene.background as THREE.Color).copy(bgWarm).lerp(bgCool, rig.nav)
+    if (rig.marsh > 0.5) (scene.background as THREE.Color).copy(MARSH_HAZE)
     fog.color.copy(scene.background as THREE.Color)
     if (cathedralRoot) cathedralRoot.visible = rig.R < 130
     portal.update(t, rig)
+    marsh.update(t, rig, camera)
     bloom.strength = 0.35 * rig.portal * (0.1 + 0.9 * rig.glow)
     bloom.enabled = rig.portal > 0.02
     composer.render()
@@ -163,6 +174,7 @@ export function createCathedral(canvas: HTMLCanvasElement, onLoaded: () => void)
     window.removeEventListener('pointermove', onPointer)
     document.removeEventListener('mouseleave', onLeave)
     portal.dispose()
+    marsh.dispose()
     composer.dispose()
     scene.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.Points) {
